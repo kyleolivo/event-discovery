@@ -1,6 +1,6 @@
 # event-discovery
 
-Finds local SF events so you don't have to. Syncs event calendars from venue websites into a local database, then uses Claude to surface events that match your interests.
+Finds local SF events so you don't have to. Syncs event calendars from venue websites into a local database, then uses OpenAI to surface events that match your interests.
 
 ## Setup
 
@@ -8,8 +8,8 @@ Finds local SF events so you don't have to. Syncs event calendars from venue web
 uv venv --python 3.13
 uv pip install -e .
 
-# Add your Anthropic API key
-echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
+# Add your OpenAI API key
+echo "OPENAI_API_KEY=sk-..." > .env
 ```
 
 ## Usage
@@ -43,7 +43,7 @@ events sources
 
 2. **Store** — SQLite at `~/.event-discovery/events.db`. All timestamps stored as UTC.
 
-3. **Rank** — `events list` sends your upcoming events and preference profile to Claude, which returns them scored 1–10 with a one-line note explaining the match.
+3. **Rank** — `events list` sends your upcoming events and preference profile to OpenAI, which returns them scored 1–10 with a one-line note explaining the match.
 
 ## Adding more sources
 
