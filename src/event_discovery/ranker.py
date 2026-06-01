@@ -1,18 +1,18 @@
-"""LLM-based event ranking using the OpenAI API."""
+"""LLM-based event ranking using the Anthropic API."""
 
 import json
 import os
 import sqlite3
 
-from openai import OpenAI
+import anthropic
 
-_client: OpenAI | None = None
+_client: anthropic.Anthropic | None = None
 
 
-def _get_client() -> OpenAI:
+def _get_client() -> anthropic.Anthropic:
     global _client
     if _client is None:
-        _client = OpenAI()
+        _client = anthropic.Anthropic()
     return _client
 
 
@@ -30,43 +30,20 @@ def _event_summary(row: sqlite3.Row) -> dict:
     }
 
 
-MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
-
-RANKING_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "events": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "title": {"type": "string"},
-                    "date": {"type": "string"},
-                    "score": {"type": "integer"},
-                    "note": {"type": "string"},
-                    "url": {
-                        "anyOf": [
-                            {"type": "string"},
-                            {"type": "null"},
-                        ],
-                    },
-                },
-                "required": ["title", "date", "score", "note", "url"],
-                "additionalProperties": False,
-            },
-        },
-    },
-    "required": ["events"],
-    "additionalProperties": False,
-}
+MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 
 SYSTEM_PROMPT = """You are an SF event concierge. Given a list of upcoming events and the user's
 interest profile, rank the events from most to least relevant. For each event, assign a relevance
 score from 1–10 and write a one-sentence note explaining why it matches (or doesn't match) the
 user's interests. Be concise and direct. Skip events with a score below 4 unless the list is short.
 
-Return only events in the requested JSON schema.
-"""
+Return ONLY a JSON object with this exact structure:
+{
+  "events": [
+    {"title": "...", "date": "YYYY-MM-DD", "score": 8, "note": "...", "url": "..."},
+    ...
+  ]
+}"""
 
 
 def rank_events(
@@ -82,24 +59,20 @@ def rank_events(
 {preferences}
 
 Upcoming events (next {days} days):
-{json.dumps(summaries, indent=2)}
-"""
+{json.dumps(summaries, indent=2)}"""
 
     client = _get_client()
-    response = client.responses.create(
+    response = client.messages.create(
         model=MODEL,
-        instructions=SYSTEM_PROMPT,
-        input=user_message,
-        max_output_tokens=4096,
-        text={
-            "format": {
-                "type": "json_schema",
-                "name": "ranked_events",
-                "schema": RANKING_SCHEMA,
-                "strict": True,
-            },
-        },
+        max_tokens=4096,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_message}],
     )
 
-    payload = json.loads(response.output_text)
+    text = response.content[0].text.strip()
+    # Strip markdown code fences if present
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+
+    payload = json.loads(text)
     return payload["events"]

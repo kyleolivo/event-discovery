@@ -29,12 +29,11 @@ from rich.table import Table
 from rich import box
 
 from event_discovery import db, ranker
-from event_discovery.collectors import tribe_events
+from event_discovery.collectors import tribe_events, ical, luma
 
 console = Console()
 
 # Display times in SF local time (PDT = UTC-7, PST = UTC-8).
-# Using a fixed offset is fine for display purposes; the raw UTC is stored in the DB.
 _PDT = timezone(timedelta(hours=-7))
 
 
@@ -48,15 +47,48 @@ def _fmt_time(utc_str: str | None) -> str:
     except ValueError:
         return utc_str[11:16]
 
+
 # ---------------------------------------------------------------------------
-# Built-in sources. More can be added via `events sources add`.
+# Sources
 # ---------------------------------------------------------------------------
 DEFAULT_SOURCES = [
+    # Tribe Events (WordPress plugin — exposes /wp-json/tribe/events/v1/events)
     {
         "name": "Yerba Buena Gardens Festival",
         "url": "https://ybgfestival.org",
         "kind": "tribe_events",
     },
+    # Luma community calendars
+    # These use Luma's public API; calendar_id overrides the slug derived from the URL.
+    {
+        "name": "Luma SF",
+        "url": "https://lu.ma/sf",
+        "kind": "luma",
+        # calendar_id will be resolved from the slug "sf" in the URL
+    },
+    # iCal feeds — standard .ics URLs published by venues
+    # Uncomment and verify the URL for each venue before enabling.
+    #
+    # {
+    #     "name": "SF Symphony",
+    #     "url": "https://www.sfsymphony.org/events.ics",
+    #     "kind": "ical",
+    # },
+    # {
+    #     "name": "SF Opera",
+    #     "url": "https://www.sfopera.com/calendar.ics",
+    #     "kind": "ical",
+    # },
+    # {
+    #     "name": "SFJAZZ",
+    #     "url": "https://www.sfjazz.org/events/ical",
+    #     "kind": "ical",
+    # },
+    # {
+    #     "name": "The Fillmore",
+    #     "url": "https://www.livenation.com/venue/KovZpZAE6nIA/the-fillmore-events.ics",
+    #     "kind": "ical",
+    # },
 ]
 
 
@@ -82,13 +114,20 @@ def sync(source_filter: str | None):
     with db.get_conn() as conn:
         for source in sources:
             console.print(f"Syncing [bold]{source['name']}[/bold]...")
-            if source["kind"] == "tribe_events":
-                added, updated = tribe_events.sync(conn, source["name"], source["url"])
-                console.print(
-                    f"  [green]+{added} new[/green]  [dim]{updated} updated[/dim]"
-                )
-            else:
-                console.print(f"  [yellow]Unknown kind '{source['kind']}', skipping[/yellow]")
+            kind = source["kind"]
+            try:
+                if kind == "tribe_events":
+                    added, updated = tribe_events.sync(conn, source["name"], source["url"])
+                elif kind == "ical":
+                    added, updated = ical.sync(conn, source["name"], source["url"])
+                elif kind == "luma":
+                    added, updated = luma.sync(conn, source["name"], source["url"], source)
+                else:
+                    console.print(f"  [yellow]Unknown kind '{kind}', skipping[/yellow]")
+                    continue
+                console.print(f"  [green]+{added} new[/green]  [dim]{updated} updated[/dim]")
+            except Exception as e:
+                console.print(f"  [red]Error: {e}[/red]")
 
 
 # ---------------------------------------------------------------------------
@@ -100,10 +139,14 @@ def sync(source_filter: str | None):
               help="Use LLM to rank by your preferences")
 @click.option("--min-score", default=5, show_default=True,
               help="Hide events with score below this (only with --rank)")
-def list_events(days: int, rank: bool, min_score: int):
+@click.option("--search", default=None, help="Filter by keyword before ranking")
+def list_events(days: int, rank: bool, min_score: int, search: str | None):
     """Show upcoming events, optionally ranked by your interests."""
     with db.get_conn() as conn:
-        events = db.get_upcoming_events(conn, days=days)
+        if search:
+            events = db.search_events(conn, search, days=days)
+        else:
+            events = db.get_upcoming_events(conn, days=days)
 
         if not events:
             console.print("[yellow]No events found. Run 'events sync' first.[/yellow]")
@@ -173,6 +216,48 @@ def _print_plain(events):
 
 
 # ---------------------------------------------------------------------------
+# digest
+# ---------------------------------------------------------------------------
+@cli.command()
+@click.option("--days", default=7, show_default=True, help="Days ahead to cover")
+@click.option("--min-score", default=6, show_default=True, help="Minimum relevance score")
+def digest(days: int, min_score: int):
+    """Print a formatted weekly events digest ranked by your preferences."""
+    with db.get_conn() as conn:
+        events = db.get_upcoming_events(conn, days=days)
+        if not events:
+            console.print("[yellow]No events found. Run 'events sync' first.[/yellow]")
+            return
+
+        prefs = db.get_preferences(conn)
+        if not prefs:
+            console.print("[yellow]Set preferences first with 'events prefs'.[/yellow]")
+            return
+
+        console.print(f"[bold]Generating digest for the next {days} days…[/bold]")
+        ranked = ranker.rank_events(events, prefs, days=days)
+        ranked = [e for e in ranked if e["score"] >= min_score]
+
+    if not ranked:
+        console.print(f"[dim]Nothing scored ≥ {min_score} in the next {days} days.[/dim]")
+        return
+
+    now = datetime.now(_PDT)
+    console.print(f"\n[bold]Your SF Events — {now.strftime('%B %-d, %Y')}[/bold]\n")
+
+    url_map = {e["title"]: e["url"] for e in events}
+    for e in ranked:
+        score = e["score"]
+        color = "green" if score >= 8 else "yellow"
+        url = e.get("url") or url_map.get(e["title"], "")
+        console.print(f"[{color}]●[/{color}] [bold]{e['title']}[/bold]  [{color}]{score}/10[/{color}]")
+        console.print(f"  {e['date']}  {e.get('note', '')}")
+        if url:
+            console.print(f"  [dim]{url}[/dim]")
+        console.print()
+
+
+# ---------------------------------------------------------------------------
 # prefs
 # ---------------------------------------------------------------------------
 @cli.command()
@@ -213,7 +298,7 @@ def prefs(show: bool):
 
 
 # ---------------------------------------------------------------------------
-# sources (list only for now)
+# sources
 # ---------------------------------------------------------------------------
 @cli.command()
 def sources():
@@ -236,3 +321,18 @@ def sources():
         table.add_row(str(r["id"]), r["name"], r["kind"], r["url"], r["created_at"][:10])
 
     console.print(table)
+
+
+# ---------------------------------------------------------------------------
+# mcp-server
+# ---------------------------------------------------------------------------
+@cli.command("mcp-server")
+def mcp_server():
+    """Start the MCP server for Claude Desktop / Claude.ai integration.
+
+    Add to Claude Desktop config (claude_desktop_config.json):
+
+        "sf-events": { "command": "events", "args": ["mcp-server"] }
+    """
+    from event_discovery.mcp_server import run
+    run()
