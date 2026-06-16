@@ -1,23 +1,24 @@
-"""LLM-based event ranking using the OpenAI API."""
+"""LLM-based event ranking using the Anthropic API."""
 
 import json
 import os
 import sqlite3
 
-from openai import OpenAI
+import anthropic
 
-_client: OpenAI | None = None
+_client: anthropic.Anthropic | None = None
 
 
-def _get_client() -> OpenAI:
+def _get_client() -> anthropic.Anthropic:
     global _client
     if _client is None:
-        _client = OpenAI()
+        _client = anthropic.Anthropic()
     return _client
 
 
-def _event_summary(row: sqlite3.Row) -> dict:
+def _event_summary(index: int, row: sqlite3.Row) -> dict:
     return {
+        "index": index,
         "title": row["title"],
         "date": row["start_utc"][:10],
         "time": row["start_utc"][11:16] + " UTC" if row["start_utc"] else None,
@@ -30,7 +31,7 @@ def _event_summary(row: sqlite3.Row) -> dict:
     }
 
 
-MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
+MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-8")
 
 RANKING_SCHEMA = {
     "type": "object",
@@ -40,18 +41,11 @@ RANKING_SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "title": {"type": "string"},
-                    "date": {"type": "string"},
+                    "index": {"type": "integer"},
                     "score": {"type": "integer"},
                     "note": {"type": "string"},
-                    "url": {
-                        "anyOf": [
-                            {"type": "string"},
-                            {"type": "null"},
-                        ],
-                    },
                 },
-                "required": ["title", "date", "score", "note", "url"],
+                "required": ["index", "score", "note"],
                 "additionalProperties": False,
             },
         },
@@ -61,11 +55,13 @@ RANKING_SCHEMA = {
 }
 
 SYSTEM_PROMPT = """You are an SF event concierge. Given a list of upcoming events and the user's
-interest profile, rank the events from most to least relevant. For each event, assign a relevance
-score from 1–10 and write a one-sentence note explaining why it matches (or doesn't match) the
-user's interests. Be concise and direct. Skip events with a score below 4 unless the list is short.
+interest profile, rank the events from most to least relevant. Each event has a numeric `index`.
+For each event, return its `index`, a relevance `score` from 1–10, and a one-sentence `note`
+explaining why it matches (or doesn't match) the user's interests. Be concise and direct. Skip
+events with a score below 4 unless the list is short.
 
-Return only events in the requested JSON schema.
+Refer to events only by their `index` — do not echo titles or URLs. Return events in the requested
+JSON schema, ordered from most to least relevant.
 """
 
 
@@ -77,7 +73,7 @@ def rank_events(
     if not events:
         return []
 
-    summaries = [_event_summary(e) for e in events]
+    summaries = [_event_summary(i, e) for i, e in enumerate(events)]
     user_message = f"""User interests:
 {preferences}
 
@@ -86,20 +82,35 @@ Upcoming events (next {days} days):
 """
 
     client = _get_client()
-    response = client.responses.create(
+    response = client.messages.create(
         model=MODEL,
-        instructions=SYSTEM_PROMPT,
-        input=user_message,
-        max_output_tokens=4096,
-        text={
+        max_tokens=8192,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_message}],
+        output_config={
             "format": {
                 "type": "json_schema",
-                "name": "ranked_events",
                 "schema": RANKING_SCHEMA,
-                "strict": True,
             },
         },
     )
 
-    payload = json.loads(response.output_text)
-    return payload["events"]
+    text = next(block.text for block in response.content if block.type == "text")
+    payload = json.loads(text)
+
+    # Map the model's scores back onto the authoritative DB rows so titles,
+    # dates, and URLs come from the database rather than the model echoing them.
+    ranked = []
+    for item in payload["events"]:
+        index = item["index"]
+        if not 0 <= index < len(events):
+            continue
+        row = events[index]
+        ranked.append({
+            "title": row["title"],
+            "date": row["start_utc"][:10],
+            "url": row["url"],
+            "score": item["score"],
+            "note": item["note"],
+        })
+    return ranked
