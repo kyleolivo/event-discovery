@@ -76,13 +76,9 @@ DEFAULT_SOURCES = [
         "kind": "ticketmaster",
     },
     # iCal feeds — standard .ics URLs published by venues.
-    # Uncomment and verify the URL for each venue before enabling.
-    #
-    # {
-    #     "name": "SF Symphony",
-    #     "url": "https://www.sfsymphony.org/events.ics",
-    #     "kind": "ical",
-    # },
+    # Add any venue that publishes a .ics feed here.
+    # Note: SFJAZZ, SF Symphony, SF Opera, The Fillmore, etc. are covered
+    # by the Ticketmaster collector above.
 ]
 
 
