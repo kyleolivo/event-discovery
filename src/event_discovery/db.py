@@ -109,6 +109,21 @@ def get_upcoming_events(conn: sqlite3.Connection, days: int = 60) -> list[sqlite
     ).fetchall()
 
 
+def search_events(
+    conn: sqlite3.Connection, query: str, days: int = 90
+) -> list[sqlite3.Row]:
+    like = f"%{query}%"
+    return conn.execute(
+        """SELECT e.*, s.name as source_name
+           FROM events e
+           JOIN sources s ON s.id = e.source_id
+           WHERE date(e.start_utc) BETWEEN date('now') AND date('now', ? || ' days')
+             AND (e.title LIKE ? OR e.description LIKE ? OR e.venue_name LIKE ?)
+           ORDER BY e.start_utc""",
+        (f"+{days}", like, like, like),
+    ).fetchall()
+
+
 def get_preferences(conn: sqlite3.Connection) -> str | None:
     row = conn.execute(
         "SELECT body FROM preferences ORDER BY updated_at DESC LIMIT 1"

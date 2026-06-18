@@ -31,7 +31,7 @@ def _event_summary(index: int, row: sqlite3.Row) -> dict:
     }
 
 
-MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-8")
+MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 
 RANKING_SCHEMA = {
     "type": "object",
@@ -78,8 +78,7 @@ def rank_events(
 {preferences}
 
 Upcoming events (next {days} days):
-{json.dumps(summaries, indent=2)}
-"""
+{json.dumps(summaries, indent=2)}"""
 
     client = _get_client()
     response = client.messages.create(
@@ -98,8 +97,6 @@ Upcoming events (next {days} days):
     text = next(block.text for block in response.content if block.type == "text")
     payload = json.loads(text)
 
-    # Map the model's scores back onto the authoritative DB rows so titles,
-    # dates, and URLs come from the database rather than the model echoing them.
     ranked = []
     for item in payload["events"]:
         index = item["index"]
