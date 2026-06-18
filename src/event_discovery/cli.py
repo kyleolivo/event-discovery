@@ -29,7 +29,7 @@ from rich.table import Table
 from rich import box
 
 from event_discovery import db, ranker
-from event_discovery.collectors import tribe_events, ical, luma
+from event_discovery.collectors import tribe_events, ical, luma, ticketmaster
 
 console = Console()
 
@@ -66,27 +66,21 @@ DEFAULT_SOURCES = [
         "kind": "luma",
         # calendar_id will be resolved from the slug "sf" in the URL
     },
-    # iCal feeds — standard .ics URLs published by venues
+    # Ticketmaster Discovery API — covers all major venues that sell through
+    # Ticketmaster/Live Nation: Fillmore, Warfield, Chase Center, Davies Symphony
+    # Hall, War Memorial Opera House, Bill Graham Civic, SFJAZZ, etc.
+    # Requires a free API key: https://developer.ticketmaster.com/
+    {
+        "name": "Ticketmaster SF",
+        "url": "https://app.ticketmaster.com/discovery/v2/events.json",
+        "kind": "ticketmaster",
+    },
+    # iCal feeds — standard .ics URLs published by venues.
     # Uncomment and verify the URL for each venue before enabling.
     #
     # {
     #     "name": "SF Symphony",
     #     "url": "https://www.sfsymphony.org/events.ics",
-    #     "kind": "ical",
-    # },
-    # {
-    #     "name": "SF Opera",
-    #     "url": "https://www.sfopera.com/calendar.ics",
-    #     "kind": "ical",
-    # },
-    # {
-    #     "name": "SFJAZZ",
-    #     "url": "https://www.sfjazz.org/events/ical",
-    #     "kind": "ical",
-    # },
-    # {
-    #     "name": "The Fillmore",
-    #     "url": "https://www.livenation.com/venue/KovZpZAE6nIA/the-fillmore-events.ics",
     #     "kind": "ical",
     # },
 ]
@@ -122,6 +116,8 @@ def sync(source_filter: str | None):
                     added, updated = ical.sync(conn, source["name"], source["url"])
                 elif kind == "luma":
                     added, updated = luma.sync(conn, source["name"], source["url"], source)
+                elif kind == "ticketmaster":
+                    added, updated = ticketmaster.sync(conn, source["name"], source["url"])
                 else:
                     console.print(f"  [yellow]Unknown kind '{kind}', skipping[/yellow]")
                     continue

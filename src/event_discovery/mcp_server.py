@@ -114,7 +114,7 @@ def sync_events(source_name: str = "") -> str:
     """
     # Import here to avoid circular deps
     from event_discovery.cli import DEFAULT_SOURCES
-    from event_discovery.collectors import tribe_events, ical, luma
+    from event_discovery.collectors import tribe_events, ical, luma, ticketmaster
 
     sources = DEFAULT_SOURCES
     if source_name:
@@ -133,6 +133,8 @@ def sync_events(source_name: str = "") -> str:
                     added, updated = ical.sync(conn, source["name"], source["url"])
                 elif kind == "luma":
                     added, updated = luma.sync(conn, source["name"], source["url"], source)
+                elif kind == "ticketmaster":
+                    added, updated = ticketmaster.sync(conn, source["name"], source["url"])
                 else:
                     results.append(f"⚠ {source['name']}: unknown kind '{kind}'")
                     continue
