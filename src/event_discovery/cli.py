@@ -58,6 +58,11 @@ DEFAULT_SOURCES = [
         "url": "https://ybgfestival.org",
         "kind": "tribe_events",
     },
+    {
+        "name": "SF Civic Center",
+        "url": "https://sfciviccenter.org",
+        "kind": "tribe_events",
+    },
     # Luma community calendars
     # These use Luma's public API; calendar_id overrides the slug derived from the URL.
     {
