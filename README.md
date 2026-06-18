@@ -100,6 +100,12 @@ Many SF venues run this plugin, which exposes a JSON API at
 
 Currently configured:
 - Yerba Buena Gardens Festival
+- SF Civic Center
+
+### `ticketmaster` — Ticketmaster Discovery API
+Covers all major venues selling through Ticketmaster/Live Nation — The Fillmore,
+Warfield, Chase Center, Davies Symphony Hall, SFJAZZ, Bill Graham Civic, etc.
+Requires a free API key from https://developer.ticketmaster.com/
 
 ### `luma` — Luma (lu.ma) calendars
 Uses the Luma public API. Set `url` to the Luma calendar page; the slug is used
@@ -112,15 +118,6 @@ Currently configured:
 ### `ical` — Standard iCalendar (.ics) feeds
 Any venue that publishes a `.ics` feed. Many ticketing platforms (Eventbrite,
 AudienceView, Tessitura) can export one.
-
-Several SF venues are listed as commented-out examples in
-[`cli.py`](src/event_discovery/cli.py) — find the `.ics` URL for each venue
-and uncomment to enable:
-
-- SF Symphony
-- SF Opera
-- SFJAZZ
-- The Fillmore
 
 ## Adding more sources
 

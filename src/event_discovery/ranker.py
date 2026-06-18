@@ -16,8 +16,9 @@ def _get_client() -> anthropic.Anthropic:
     return _client
 
 
-def _event_summary(row: sqlite3.Row) -> dict:
+def _event_summary(index: int, row: sqlite3.Row) -> dict:
     return {
+        "index": index,
         "title": row["title"],
         "date": row["start_utc"][:10],
         "time": row["start_utc"][11:16] + " UTC" if row["start_utc"] else None,
@@ -32,18 +33,36 @@ def _event_summary(row: sqlite3.Row) -> dict:
 
 MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 
-SYSTEM_PROMPT = """You are an SF event concierge. Given a list of upcoming events and the user's
-interest profile, rank the events from most to least relevant. For each event, assign a relevance
-score from 1–10 and write a one-sentence note explaining why it matches (or doesn't match) the
-user's interests. Be concise and direct. Skip events with a score below 4 unless the list is short.
+RANKING_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "events": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "index": {"type": "integer"},
+                    "score": {"type": "integer"},
+                    "note": {"type": "string"},
+                },
+                "required": ["index", "score", "note"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["events"],
+    "additionalProperties": False,
+}
 
-Return ONLY a JSON object with this exact structure:
-{
-  "events": [
-    {"title": "...", "date": "YYYY-MM-DD", "score": 8, "note": "...", "url": "..."},
-    ...
-  ]
-}"""
+SYSTEM_PROMPT = """You are an SF event concierge. Given a list of upcoming events and the user's
+interest profile, rank the events from most to least relevant. Each event has a numeric `index`.
+For each event, return its `index`, a relevance `score` from 1–10, and a one-sentence `note`
+explaining why it matches (or doesn't match) the user's interests. Be concise and direct. Skip
+events with a score below 4 unless the list is short.
+
+Refer to events only by their `index` — do not echo titles or URLs. Return events in the requested
+JSON schema, ordered from most to least relevant.
+"""
 
 
 def rank_events(
@@ -54,7 +73,7 @@ def rank_events(
     if not events:
         return []
 
-    summaries = [_event_summary(e) for e in events]
+    summaries = [_event_summary(i, e) for i, e in enumerate(events)]
     user_message = f"""User interests:
 {preferences}
 
@@ -64,15 +83,31 @@ Upcoming events (next {days} days):
     client = _get_client()
     response = client.messages.create(
         model=MODEL,
-        max_tokens=4096,
+        max_tokens=8192,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_message}],
+        output_config={
+            "format": {
+                "type": "json_schema",
+                "schema": RANKING_SCHEMA,
+            },
+        },
     )
 
-    text = response.content[0].text.strip()
-    # Strip markdown code fences if present
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-
+    text = next(block.text for block in response.content if block.type == "text")
     payload = json.loads(text)
-    return payload["events"]
+
+    ranked = []
+    for item in payload["events"]:
+        index = item["index"]
+        if not 0 <= index < len(events):
+            continue
+        row = events[index]
+        ranked.append({
+            "title": row["title"],
+            "date": row["start_utc"][:10],
+            "url": row["url"],
+            "score": item["score"],
+            "note": item["note"],
+        })
+    return ranked
