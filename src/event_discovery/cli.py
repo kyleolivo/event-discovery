@@ -29,7 +29,7 @@ from rich.table import Table
 from rich import box
 
 from event_discovery import db, ranker
-from event_discovery.collectors import tribe_events, ical, luma, ticketmaster, funcheap, salesforce_park, cityarts
+from event_discovery.collectors import tribe_events, ical, luma, ticketmaster, funcheap, salesforce_park, cityarts, asianart
 
 console = Console()
 
@@ -86,6 +86,12 @@ DEFAULT_SOURCES = [
         "url": "https://sf.funcheap.com",
         "kind": "funcheap",
     },
+    # Asian Art Museum — exhibitions, workshops, tours, events
+    {
+        "name": "Asian Art Museum",
+        "url": "https://calendar.asianart.org",
+        "kind": "asianart",
+    },
     # City Arts & Lectures — author talks, lectures, conversations
     {
         "name": "City Arts & Lectures",
@@ -141,6 +147,8 @@ def sync(source_filter: str | None):
                     added, updated = funcheap.sync(conn, source["name"], source["url"])
                 elif kind == "cityarts":
                     added, updated = cityarts.sync(conn, source["name"], source["url"])
+                elif kind == "asianart":
+                    added, updated = asianart.sync(conn, source["name"], source["url"])
                 elif kind == "salesforce_park":
                     added, updated = salesforce_park.sync(conn, source["name"], source["url"])
                 else:
