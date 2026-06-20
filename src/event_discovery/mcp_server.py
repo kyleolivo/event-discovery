@@ -114,7 +114,7 @@ def sync_events(source_name: str = "") -> str:
     """
     # Import here to avoid circular deps
     from event_discovery.cli import DEFAULT_SOURCES
-    from event_discovery.collectors import tribe_events, ical, luma, ticketmaster, funcheap
+    from event_discovery.collectors import tribe_events, ical, luma, ticketmaster, funcheap, salesforce_park
 
     sources = DEFAULT_SOURCES
     if source_name:
@@ -137,6 +137,8 @@ def sync_events(source_name: str = "") -> str:
                     added, updated = ticketmaster.sync(conn, source["name"], source["url"])
                 elif kind == "funcheap":
                     added, updated = funcheap.sync(conn, source["name"], source["url"])
+                elif kind == "salesforce_park":
+                    added, updated = salesforce_park.sync(conn, source["name"], source["url"])
                 else:
                     results.append(f"⚠ {source['name']}: unknown kind '{kind}'")
                     continue
