@@ -29,7 +29,7 @@ from rich.table import Table
 from rich import box
 
 from event_discovery import db, ranker
-from event_discovery.collectors import tribe_events, ical, luma, ticketmaster, funcheap, salesforce_park, cityarts, asianart
+from event_discovery.collectors import tribe_events, ical, luma, ticketmaster, funcheap, salesforce_park, cityarts, asianart, sfballet
 
 console = Console()
 
@@ -104,6 +104,12 @@ DEFAULT_SOURCES = [
         "url": "https://www.tjpa.org/salesforce-transit-center/activities",
         "kind": "salesforce_park",
     },
+    # SF Ballet — scraped from sfballet.org/calendar/
+    {
+        "name": "SF Ballet",
+        "url": "https://www.sfballet.org/calendar/",
+        "kind": "sfballet",
+    },
     # iCal feeds — standard .ics URLs published by venues.
     # Add any venue that publishes a .ics feed here.
     # Note: SFJAZZ, SF Symphony, SF Opera, The Fillmore, etc. are covered
@@ -151,6 +157,8 @@ def sync(source_filter: str | None):
                     added, updated = asianart.sync(conn, source["name"], source["url"])
                 elif kind == "salesforce_park":
                     added, updated = salesforce_park.sync(conn, source["name"], source["url"])
+                elif kind == "sfballet":
+                    added, updated = sfballet.sync(conn, source["name"], source["url"])
                 else:
                     console.print(f"  [yellow]Unknown kind '{kind}', skipping[/yellow]")
                     continue
