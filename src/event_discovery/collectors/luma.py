@@ -1,10 +1,12 @@
-"""Collector for Luma (lu.ma) calendars via the public API.
+"""Collector for Luma (lu.ma) events via the public API.
 
-Each source entry should have kind="luma" and a url of the form:
-  https://lu.ma/<calendar-slug>
-or supply a calendar_id directly in the source config.
+Supports two modes:
+  1. Discover pages (e.g. lu.ma/sf) — uses the /url endpoint to get
+     featured events for a city/region.
+  2. Calendar pages (e.g. lu.ma/some-org) — uses /calendar/list-events
+     with a calendar_api_id for a specific organization's calendar.
 
-The public Luma API does not require authentication for public calendars.
+The public Luma API does not require authentication for public content.
 """
 
 import json
@@ -14,17 +16,43 @@ import httpx
 
 from event_discovery import db
 
-_API_BASE = "https://api.lu.ma/public/v1"
+_API_BASE = "https://api.lu.ma"
 
 
-def _fetch_events(calendar_id: str) -> list[dict]:
-    """Page through all upcoming events for a Luma calendar."""
+def _fetch_discover_events(slug: str) -> list[dict]:
+    """Fetch events from a Luma discover page (city/region)."""
+    resp = httpx.get(
+        f"{_API_BASE}/url",
+        params={"url": slug},
+        timeout=30,
+        headers={"Accept": "application/json"},
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    if data.get("kind") != "discover-place":
+        return []
+
+    events = []
+    for entry in data.get("data", {}).get("events", []):
+        event = entry.get("event") or entry
+        if event:
+            events.append(event)
+    return events
+
+
+def _fetch_calendar_events(calendar_api_id: str) -> list[dict]:
+    """Page through events for a specific Luma calendar."""
     events: list[dict] = []
-    params: dict = {"calendar_id": calendar_id, "pagination_limit": 50}
+    params: dict = {"calendar_api_id": calendar_api_id, "pagination_limit": 50}
     client = httpx.Client(timeout=30, follow_redirects=True)
 
     while True:
-        resp = client.get(f"{_API_BASE}/calendar/list-events", params=params)
+        resp = client.get(
+            f"{_API_BASE}/calendar/list-events",
+            params=params,
+            headers={"Accept": "application/json"},
+        )
         resp.raise_for_status()
         data = resp.json()
 
@@ -45,38 +73,35 @@ def _normalise(event: dict) -> dict:
     end_at = event.get("end_at")
     end_utc = end_at.replace("Z", "").replace("+00:00", "") if end_at else None
 
-    geo = event.get("geo_address_json") or {}
-    location_parts = filter(None, [
-        geo.get("address"),
-        geo.get("city"),
-        geo.get("region"),
-    ])
-    venue_address = ", ".join(location_parts) or None
+    geo = event.get("geo_address_info") or {}
+    venue_name = geo.get("address") or None
+    full_address = geo.get("full_address") or None
+    if not full_address:
+        location_parts = filter(None, [
+            geo.get("address"),
+            geo.get("city"),
+            geo.get("region"),
+        ])
+        full_address = ", ".join(location_parts) or None
+
+    luma_url = event.get("url", "")
+    if luma_url and not luma_url.startswith("http"):
+        luma_url = f"https://lu.ma/{luma_url}"
 
     return {
-        "external_id": event["api_id"],
+        "external_id": event.get("api_id", ""),
         "title": event.get("name", "").strip(),
-        "description": (event.get("description_short") or "").strip() or None,
+        "description": (event.get("description_short") or event.get("description") or "").strip() or None,
         "start_utc": start_utc,
         "end_utc": end_utc,
         "timezone": event.get("timezone"),
-        "venue_name": geo.get("address") or None,
-        "venue_address": venue_address,
-        "url": event.get("url"),
+        "venue_name": venue_name,
+        "venue_address": full_address,
+        "url": luma_url,
         "cost": None,
         "image_url": event.get("cover_url"),
         "raw_json": json.dumps(event),
     }
-
-
-def _resolve_calendar_id(site_url: str, source_config: dict) -> str:
-    """Extract calendar_id from source config or derive from slug in URL."""
-    if "calendar_id" in source_config:
-        return source_config["calendar_id"]
-    # Treat the path component of the URL as the calendar slug,
-    # e.g. https://lu.ma/sf -> "sf"
-    slug = site_url.rstrip("/").rsplit("/", 1)[-1]
-    return slug
 
 
 def sync(
@@ -85,16 +110,22 @@ def sync(
     site_url: str,
     source_config: dict | None = None,
 ) -> tuple[int, int]:
-    """Pull events from a Luma calendar and upsert into the DB."""
-    calendar_id = _resolve_calendar_id(site_url, source_config or {})
+    """Pull events from a Luma discover page or calendar and upsert into the DB."""
+    config = source_config or {}
     source_id = db.upsert_source(conn, name, site_url, "luma")
+
+    slug = site_url.rstrip("/").rsplit("/", 1)[-1]
+
+    if "calendar_api_id" in config:
+        raw_events = _fetch_calendar_events(config["calendar_api_id"])
+    else:
+        raw_events = _fetch_discover_events(slug)
 
     before = conn.execute(
         "SELECT COUNT(*) FROM events WHERE source_id = ?", (source_id,)
     ).fetchone()[0]
 
-    events = _fetch_events(calendar_id)
-    for raw in events:
+    for raw in raw_events:
         db.upsert_event(conn, source_id, _normalise(raw))
 
     after = conn.execute(
@@ -102,5 +133,5 @@ def sync(
     ).fetchone()[0]
 
     added = after - before
-    updated = len(events) - added
+    updated = len(raw_events) - added
     return added, updated
