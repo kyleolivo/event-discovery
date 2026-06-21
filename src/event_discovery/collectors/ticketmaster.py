@@ -61,7 +61,7 @@ def _collect_pages(api_key: str, extra_params: dict | None = None) -> Iterator[d
         page_info = data.get("page", {})
         current = page_info.get("number", 0)
         total_pages = page_info.get("totalPages", 1)
-        if current + 1 >= total_pages:
+        if current + 1 >= total_pages or current + 1 >= 10:
             break
         params["page"] = current + 1
 
